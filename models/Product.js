@@ -1,10 +1,10 @@
-const mongoose = require('mongoose');
-const { v4: uuidv4 } = require('uuid');
+const mongoose = require("mongoose");
+const { v4: uuidv4 } = require("uuid");
 
 const productSchema = new mongoose.Schema({
   _id: { type: String, default: uuidv4 },
-  user_id: { type: String, ref: 'User', required: true },
-  category_id: { type: String, ref: 'ProductCategory', required: true },
+  user_id: { type: String, ref: "User", required: true },
+  category_id: { type: String, ref: "ProductCategory", required: true },
   title: { type: String, required: true },
   description: { type: String, required: true },
   upc_id: { type: String, required: true, unique: true },
@@ -18,8 +18,4 @@ const productSchema = new mongoose.Schema({
   updated_at: { type: Date, default: Date.now },
 });
 
-// productSchema.index({ user_id: 1, type: 1 });
-// productSchema.index({ upc_id: 1 }, { unique: true });
-// productSchema.index({ title: 'text', description: 'text' });
-
-module.exports = mongoose.model('Product', productSchema);
+module.exports = mongoose.model("Product", productSchema);
