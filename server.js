@@ -9,6 +9,7 @@ const promotionRoutes = require("./routes/promotionRoutes");
 const storeRoutes = require("./routes/storeRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const faqRoutes = require("./routes/faqRoutes");
+const subscriptionRoutes = require("./routes/subscriptionRoutes");
 
 // Load environment variables
 dotenv.config();
@@ -22,7 +23,10 @@ app.use(express.json());
 // Connect to MongoDB
 mongoose
   .connect(process.env.MONGODB_URI, {})
-  .then(() => console.log("MongoDB connected successfully"))
+  .then(() => {
+    console.log("MongoDB connected successfully");
+    initializePlans();
+  })
   .catch((err) => console.error("MongoDB connection error:", err.message));
 
 // Routes
@@ -33,6 +37,8 @@ app.use("/api/promotions", promotionRoutes);
 app.use("/api/stores", storeRoutes);
 app.use("/api/faqs", faqRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/subscriptions", subscriptionRoutes);
+app.use("/api/stats", statsRoutes);
 
 // Global Error-Handling Middleware
 app.use((err, req, res, next) => {
@@ -48,7 +54,28 @@ app.use((err, req, res, next) => {
     status: err.status || 500,
   });
 });
+const initializePlans = async () => {
+  try {
+    const defaultPlans = [
+      { type: "reseller", tier: "tier1", amount: 10, duration: 30 },
+      { type: "reseller", tier: "tier2", amount: 20, duration: 90 },
+      { type: "reseller", tier: "tier3", amount: 30, duration: 180 },
+      { type: "store_owner", tier: "tier1", amount: 10, duration: 30 },
+      { type: "store_owner", tier: "tier2", amount: 20, duration: 90 },
+      { type: "store_owner", tier: "tier3", amount: 30, duration: 180 },
+    ];
 
+    for (const plan of defaultPlans) {
+      const exists = await Plan.findOne({ type: plan.type, tier: plan.tier });
+      if (!exists) {
+        await new Plan({ _id: uuidv4(), ...plan }).save();
+        console.log(`Initialized ${plan.type} ${plan.tier} plan`);
+      }
+    }
+  } catch (error) {
+    console.error("Failed to initialize plans:", error);
+  }
+};
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

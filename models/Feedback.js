@@ -8,6 +8,9 @@ const feedbackSchema = new mongoose.Schema({
   user_email: { type: String, required: true },
   suggestion: { type: String, required: true },
   user_id: { type: String, ref: "User", required: true },
+  type: { type: String, enum: ["reseller", "store_owner"], required: true },
+  status: { type: String, enum: ["pending", "replied"], default: "pending" },
+  reply: { type: String, default: null }, // Admin reply
   created_at: { type: Date, default: Date.now },
 });
 

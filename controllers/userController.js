@@ -5,6 +5,7 @@ const { check, validationResult } = require("express-validator");
 const User = require("../models/User");
 const Store = require("../models/Store");
 const Feedback = require("../models/Feedback");
+const Notification = require("../models/Notification");
 const { sendMail } = require("../utils/mailer");
 
 // Initialize fixed admin user on server startup
@@ -21,7 +22,6 @@ const initializeAdmin = async () => {
         email: adminEmail,
         password: hashedPassword,
         role: 1,
-        subscription: "free",
       });
       await admin.save();
       console.log("Admin user created:", adminEmail);
@@ -144,7 +144,6 @@ const register = [
         card_information: role === 2 ? card_information : {},
         expertise_level: role === 2 ? expertise_level : null,
         profile_image: role === 2 ? profile_image : null,
-        subscription: "free",
       });
       await user.save();
 
@@ -225,9 +224,9 @@ const login = [
 
 const getProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId).select(
-      "-password -card_information"
-    );
+    const user = await User.findById(req.user.userId)
+      .select("-password -card_information")
+      .populate("subscription");
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(user);
   } catch (error) {
@@ -429,150 +428,6 @@ const resetPassword = [
   },
 ];
 
-const subscribe = [
-  check("plan").isIn(["free", "paid"]).withMessage("Plan must be free or paid"),
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty())
-      return res.status(400).json({ errors: errors.array() });
-
-    const { plan } = req.body;
-    const userId = req.user.userId;
-
-    try {
-      const user = await User.findById(userId);
-      if (!user) return res.status(404).json({ message: "User not found" });
-
-      if (plan === user.subscription) {
-        return res
-          .status(400)
-          .json({ message: `User is already on ${plan} plan` });
-      }
-
-      user.subscription = plan;
-      if (plan === "paid") {
-        user.subscription_start = new Date();
-        user.subscription_end = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-      } else {
-        user.subscription_start = null;
-        user.subscription_end = null;
-      }
-      await user.save();
-
-      res.json({
-        message: `Subscribed to ${plan} plan successfully`,
-        subscription: user.subscription,
-      });
-    } catch (error) {
-      console.error("Subscribe error:", error);
-      res.status(500).json({ message: "Server error", error: error.message });
-    }
-  },
-];
-
-const getSubscription = async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId).select(
-      "subscription subscription_start subscription_end"
-    );
-    if (!user) return res.status(404).json({ message: "User not found" });
-
-    res.json({
-      subscription: user.subscription,
-      subscription_start: user.subscription_start,
-      subscription_end: user.subscription_end,
-    });
-  } catch (error) {
-    console.error("Get subscription error:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
-  }
-};
-
-const cancelSubscription = async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId);
-    if (!user) return res.status(404).json({ message: "User not found" });
-
-    if (user.subscription === "free") {
-      return res.status(400).json({ message: "User is already on free plan" });
-    }
-
-    user.subscription = "free";
-    user.subscription_start = null;
-    user.subscription_end = null;
-    await user.save();
-
-    res.json({ message: "Subscription cancelled successfully" });
-  } catch (error) {
-    console.error("Cancel subscription error:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
-  }
-};
-
-const submitFeedback = [
-  check("rating")
-    .isInt({ min: 1, max: 5 })
-    .withMessage("Rating must be between 1 and 5"),
-  check("suggestion").notEmpty().withMessage("Suggestion is required"),
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty())
-      return res.status(400).json({ errors: errors.array() });
-
-    const { rating, suggestion } = req.body;
-    const userId = req.user.userId;
-
-    try {
-      const user = await User.findById(userId);
-      if (!user) return res.status(404).json({ message: "User not found" });
-      if (user.role === 1)
-        return res
-          .status(403)
-          .json({ message: "Admins cannot submit feedback" });
-
-      const feedback = new Feedback({
-        _id: uuidv4(),
-        rating,
-        user_name: user.full_name,
-        user_email: user.email,
-        suggestion,
-        user_id: userId,
-      });
-      await feedback.save();
-
-      // Notify admin (optional, can be customized)
-      const admin = await User.findOne({ role: 1 });
-      if (admin) {
-        await sendMail(
-          admin.email,
-          "New Feedback Received",
-          `Feedback from ${user.full_name} (${user.email}): Rating: ${rating}/5, Suggestion: ${suggestion}`
-        );
-      }
-
-      res.status(201).json({ message: "Feedback submitted successfully" });
-    } catch (error) {
-      console.error("Submit feedback error:", error);
-      res.status(500).json({ message: "Server error", error: error.message });
-    }
-  },
-];
-
-const getFeedback = async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId);
-    if (!user) return res.status(404).json({ message: "User not found" });
-    if (user.role !== 1)
-      return res.status(403).json({ message: "Only admins can view feedback" });
-
-    const feedback = await Feedback.find();
-    res.json(feedback);
-  } catch (error) {
-    console.error("Get feedback error:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
-  }
-};
-
 const changePassword = [
   check("old_password").notEmpty().withMessage("Old password is required"),
   check("new_password")
@@ -626,7 +481,6 @@ const deleteAccount = [
 
       let userToDelete;
       if (user_id && requester.role === 1) {
-        // Admin deleting another user
         userToDelete = await User.findById(user_id);
         if (!userToDelete)
           return res.status(404).json({ message: "User to delete not found" });
@@ -635,7 +489,6 @@ const deleteAccount = [
             .status(403)
             .json({ message: "Admins cannot delete other admins" });
       } else {
-        // User deleting their own account
         userToDelete = requester;
         if (userToDelete.role === 1)
           return res
@@ -643,7 +496,6 @@ const deleteAccount = [
             .json({ message: "Admins cannot delete their own accounts" });
       }
 
-      // Delete associated store for store owners
       if (userToDelete.role === 3) {
         await Store.deleteOne({ user_id: userToDelete._id });
       }
@@ -657,6 +509,219 @@ const deleteAccount = [
   },
 ];
 
+const submitFeedback = [
+  check("rating")
+    .isInt({ min: 1, max: 5 })
+    .withMessage("Rating must be between 1 and 5"),
+  check("suggestion").notEmpty().withMessage("Suggestion is required"),
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty())
+      return res.status(400).json({ errors: errors.array() });
+
+    const { rating, suggestion } = req.body;
+    const userId = req.user.userId;
+
+    try {
+      const user = await User.findById(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      if (user.role === 1)
+        return res
+          .status(403)
+          .json({ message: "Admins cannot submit feedback" });
+
+      const feedback = new Feedback({
+        _id: uuidv4(),
+        rating,
+        user_name: user.full_name,
+        user_email: user.email,
+        suggestion,
+        user_id: userId,
+        type: user.role === 2 ? "reseller" : "store_owner",
+      });
+      await feedback.save();
+
+      const admin = await User.findOne({ role: 1 });
+      if (admin) {
+        const notification = new Notification({
+          _id: uuidv4(),
+          user_id: admin._id,
+          message: `New feedback from ${user.full_name} (${user.email}): Rating: ${rating}/5, Suggestion: ${suggestion}`,
+          type: user.role === 2 ? "reseller" : "store_owner",
+        });
+        await notification.save();
+        await sendMail(
+          admin.email,
+          "New Feedback Received",
+          `Feedback from ${user.full_name} (${user.email}, ${
+            user.role === 2 ? "reseller" : "store_owner"
+          }): Rating: ${rating}/5, Suggestion: ${suggestion}`
+        );
+      }
+
+      res.status(201).json({ message: "Feedback submitted successfully" });
+    } catch (error) {
+      console.error("Submit feedback error:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+];
+
+const getFeedback = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
+    if (user.role !== 1)
+      return res.status(403).json({ message: "Only admins can view feedback" });
+
+    const feedback = await Feedback.find();
+    res.json(feedback);
+  } catch (error) {
+    console.error("Get feedback error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const replyFeedback = [
+  check("feedback_id").notEmpty().withMessage("Feedback ID is required"),
+  check("reply").notEmpty().withMessage("Reply is required"),
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty())
+      return res.status(400).json({ errors: errors.array() });
+
+    const { feedback_id, reply } = req.body;
+    const userId = req.user.userId;
+
+    try {
+      const user = await User.findById(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      if (user.role !== 1)
+        return res
+          .status(403)
+          .json({ message: "Only admins can reply to feedback" });
+
+      const feedback = await Feedback.findById(feedback_id);
+      if (!feedback)
+        return res.status(404).json({ message: "Feedback not found" });
+
+      feedback.reply = reply;
+      feedback.status = "replied";
+      await feedback.save();
+
+      const feedbackUser = await User.findById(feedback.user_id);
+      if (feedbackUser) {
+        await sendMail(
+          feedbackUser.email,
+          "Feedback Reply",
+          `Admin replied to your feedback: ${reply}`
+        );
+      }
+
+      res.json({ message: "Feedback replied successfully", feedback });
+    } catch (error) {
+      console.error("Reply feedback error:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+];
+
+const approveStoreOwner = [
+  check("user_id").notEmpty().withMessage("User ID is required"),
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty())
+      return res.status(400).json({ errors: errors.array() });
+
+    const { user_id } = req.body;
+    const requesterId = req.user.userId;
+
+    try {
+      const requester = await User.findById(requesterId);
+      if (!requester)
+        return res.status(404).json({ message: "Requester not found" });
+      if (requester.role !== 1)
+        return res
+          .status(403)
+          .json({ message: "Only admins can approve store owners" });
+
+      const user = await User.findById(user_id);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      if (user.role !== 3)
+        return res.status(400).json({ message: "User is not a store owner" });
+
+      user.verified = true;
+      await user.save();
+
+      const notification = new Notification({
+        _id: uuidv4(),
+        user_id: user._id,
+        message: "Your store owner account has been verified.",
+        type: "store_owner",
+      });
+      await notification.save();
+      await sendMail(
+        user.email,
+        "Account Verified",
+        "Your store owner account has been verified."
+      );
+
+      res.json({ message: "Store owner approved successfully" });
+    } catch (error) {
+      console.error("Approve store owner error:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+];
+
+const rejectStoreOwner = [
+  check("user_id").notEmpty().withMessage("User ID is required"),
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty())
+      return res.status(400).json({ errors: errors.array() });
+
+    const { user_id } = req.body;
+    const requesterId = req.user.userId;
+
+    try {
+      const requester = await User.findById(requesterId);
+      if (!requester)
+        return res.status(404).json({ message: "Requester not found" });
+      if (requester.role !== 1)
+        return res
+          .status(403)
+          .json({ message: "Only admins can reject store owners" });
+
+      const user = await User.findById(user_id);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      if (user.role !== 3)
+        return res.status(400).json({ message: "User is not a store owner" });
+
+      user.verified = false;
+      await user.save();
+
+      const notification = new Notification({
+        _id: uuidv4(),
+        user_id: user._id,
+        message: "Your store owner account verification was rejected.",
+        type: "store_owner",
+      });
+      await notification.save();
+      await sendMail(
+        user.email,
+        "Account Verification Rejected",
+        "Your store owner account verification was rejected."
+      );
+
+      res.json({ message: "Store owner rejected successfully" });
+    } catch (error) {
+      console.error("Reject store owner error:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+];
+
 module.exports = {
   register,
   login,
@@ -665,11 +730,11 @@ module.exports = {
   forgotPassword,
   verifyOTP,
   resetPassword,
-  subscribe,
-  getSubscription,
-  cancelSubscription,
-  submitFeedback,
-  getFeedback,
   changePassword,
   deleteAccount,
+  submitFeedback,
+  getFeedback,
+  replyFeedback,
+  approveStoreOwner,
+  rejectStoreOwner,
 };
