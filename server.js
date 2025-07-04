@@ -10,6 +10,9 @@ const storeRoutes = require("./routes/storeRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const faqRoutes = require("./routes/faqRoutes");
 const subscriptionRoutes = require("./routes/subscriptionRoutes");
+const statsRoutes = require("./routes/statsRoutes");
+const Plan = require("./models/Plan");
+const { v4: uuidv4 } = require("uuid");
 
 // Load environment variables
 dotenv.config();
