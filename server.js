@@ -2,6 +2,8 @@ const express = require("express");
 const mongoose = require("mongoose");
 const dotenv = require("dotenv");
 const cors = require("cors");
+const { v4: uuidv4 } = require("uuid");
+const Plan = require("./models/Plan");
 const userRoutes = require("./routes/userRoutes");
 const productRoutes = require("./routes/productRoutes");
 const categoryRoutes = require("./routes/categoryRoutes");
@@ -10,6 +12,7 @@ const storeRoutes = require("./routes/storeRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const faqRoutes = require("./routes/faqRoutes");
 const subscriptionRoutes = require("./routes/subscriptionRoutes");
+const statsRoutes = require("./routes/statsRoutes");
 
 // Load environment variables
 dotenv.config();
