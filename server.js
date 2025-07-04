@@ -10,6 +10,7 @@ const storeRoutes = require("./routes/storeRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const faqRoutes = require("./routes/faqRoutes");
 const subscriptionRoutes = require("./routes/subscriptionRoutes");
+const statsRoutes = require("./routes/statsRoutes");
 
 // Load environment variables
 dotenv.config();
