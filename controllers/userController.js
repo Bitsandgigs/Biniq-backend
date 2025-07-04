@@ -4,13 +4,14 @@ const { v4: uuidv4 } = require("uuid");
 const { check, validationResult } = require("express-validator");
 const User = require("../models/User");
 const Store = require("../models/Store");
+const Feedback = require("../models/Feedback");
 const { sendMail } = require("../utils/mailer");
 
 // Initialize fixed admin user on server startup
 const initializeAdmin = async () => {
   try {
     const adminEmail = "admin@binIQ.com";
-    const adminPassword = "Admin@123"; // Change in production or use env variable
+    const adminPassword = "Admin@123";
     const existingAdmin = await User.findOne({ email: adminEmail });
     if (!existingAdmin) {
       const hashedPassword = await bcrypt.hash(adminPassword, 10);
@@ -19,8 +20,8 @@ const initializeAdmin = async () => {
         full_name: "Admin User",
         email: adminEmail,
         password: hashedPassword,
-        role: 1, // Admin
-        subscription: "free", // Admin gets free access
+        role: 1,
+        subscription: "free",
       });
       await admin.save();
       console.log("Admin user created:", adminEmail);
@@ -30,7 +31,6 @@ const initializeAdmin = async () => {
   }
 };
 
-// Run admin initialization
 initializeAdmin();
 
 const register = [
@@ -148,7 +148,6 @@ const register = [
       });
       await user.save();
 
-      // Create default store for Store Owner (role: 3)
       if (role === 3) {
         const existingStore = await Store.findOne({ user_id: user._id });
         if (existingStore) {
@@ -347,7 +346,7 @@ const forgotPassword = [
 
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
       user.resetPasswordToken = otp;
-      user.resetPasswordExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
+      user.resetPasswordExpires = Date.now() + 10 * 60 * 1000;
       await user.save();
 
       await sendMail(
@@ -453,7 +452,7 @@ const subscribe = [
       user.subscription = plan;
       if (plan === "paid") {
         user.subscription_start = new Date();
-        user.subscription_end = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
+        user.subscription_end = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
       } else {
         user.subscription_start = null;
         user.subscription_end = null;
@@ -510,6 +509,154 @@ const cancelSubscription = async (req, res) => {
   }
 };
 
+const submitFeedback = [
+  check("rating")
+    .isInt({ min: 1, max: 5 })
+    .withMessage("Rating must be between 1 and 5"),
+  check("suggestion").notEmpty().withMessage("Suggestion is required"),
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty())
+      return res.status(400).json({ errors: errors.array() });
+
+    const { rating, suggestion } = req.body;
+    const userId = req.user.userId;
+
+    try {
+      const user = await User.findById(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      if (user.role === 1)
+        return res
+          .status(403)
+          .json({ message: "Admins cannot submit feedback" });
+
+      const feedback = new Feedback({
+        _id: uuidv4(),
+        rating,
+        user_name: user.full_name,
+        user_email: user.email,
+        suggestion,
+        user_id: userId,
+      });
+      await feedback.save();
+
+      // Notify admin (optional, can be customized)
+      const admin = await User.findOne({ role: 1 });
+      if (admin) {
+        await sendMail(
+          admin.email,
+          "New Feedback Received",
+          `Feedback from ${user.full_name} (${user.email}): Rating: ${rating}/5, Suggestion: ${suggestion}`
+        );
+      }
+
+      res.status(201).json({ message: "Feedback submitted successfully" });
+    } catch (error) {
+      console.error("Submit feedback error:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+];
+
+const getFeedback = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
+    if (user.role !== 1)
+      return res.status(403).json({ message: "Only admins can view feedback" });
+
+    const feedback = await Feedback.find();
+    res.json(feedback);
+  } catch (error) {
+    console.error("Get feedback error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const changePassword = [
+  check("old_password").notEmpty().withMessage("Old password is required"),
+  check("new_password")
+    .isLength({ min: 6 })
+    .withMessage("New password must be at least 6 characters"),
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty())
+      return res.status(400).json({ errors: errors.array() });
+
+    const { old_password, new_password } = req.body;
+    const userId = req.user.userId;
+
+    try {
+      const user = await User.findById(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      const isMatch = await bcrypt.compare(old_password, user.password);
+      if (!isMatch)
+        return res.status(400).json({ message: "Invalid old password" });
+
+      user.password = await bcrypt.hash(new_password, 10);
+      user.updated_at = Date.now();
+      await user.save();
+
+      res.json({ message: "Password changed successfully" });
+    } catch (error) {
+      console.error("Change password error:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+];
+
+const deleteAccount = [
+  check("user_id")
+    .optional()
+    .notEmpty()
+    .withMessage("User ID is required for admin deletion"),
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty())
+      return res.status(400).json({ errors: errors.array() });
+
+    const { user_id } = req.body;
+    const requesterId = req.user.userId;
+
+    try {
+      const requester = await User.findById(requesterId);
+      if (!requester)
+        return res.status(404).json({ message: "Requester not found" });
+
+      let userToDelete;
+      if (user_id && requester.role === 1) {
+        // Admin deleting another user
+        userToDelete = await User.findById(user_id);
+        if (!userToDelete)
+          return res.status(404).json({ message: "User to delete not found" });
+        if (userToDelete.role === 1)
+          return res
+            .status(403)
+            .json({ message: "Admins cannot delete other admins" });
+      } else {
+        // User deleting their own account
+        userToDelete = requester;
+        if (userToDelete.role === 1)
+          return res
+            .status(403)
+            .json({ message: "Admins cannot delete their own accounts" });
+      }
+
+      // Delete associated store for store owners
+      if (userToDelete.role === 3) {
+        await Store.deleteOne({ user_id: userToDelete._id });
+      }
+
+      await User.deleteOne({ _id: userToDelete._id });
+      res.json({ message: "Account deleted successfully" });
+    } catch (error) {
+      console.error("Delete account error:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+];
+
 module.exports = {
   register,
   login,
@@ -521,4 +668,8 @@ module.exports = {
   subscribe,
   getSubscription,
   cancelSubscription,
+  submitFeedback,
+  getFeedback,
+  changePassword,
+  deleteAccount,
 };
