@@ -8,7 +8,6 @@ const Feedback = require("../models/Feedback");
 const Notification = require("../models/Notification");
 const { sendMail } = require("../utils/mailer");
 
-// Initialize fixed admin user on server startup
 const initializeAdmin = async () => {
   try {
     const adminEmail = "admin@binIQ.com";
@@ -144,18 +143,17 @@ const register = [
         card_information: role === 2 ? card_information : {},
         expertise_level: role === 2 ? expertise_level : null,
         profile_image: role === 2 ? profile_image : null,
+        used_promotions: role === 3 ? 0 : null,
       });
       await user.save();
 
       if (role === 3) {
         const existingStore = await Store.findOne({ user_id: user._id });
         if (existingStore) {
-          return res
-            .status(400)
-            .json({
-              success: false,
-              message: "Store already exists for this user",
-            });
+          return res.status(400).json({
+            success: false,
+            message: "Store already exists for this user",
+          });
         }
 
         const store = new Store({
@@ -173,22 +171,18 @@ const register = [
         await store.save();
       }
 
-      res
-        .status(201)
-        .json({
-          success: true,
-          user_id: user._id,
-          message: "User registered successfully",
-        });
+      res.status(201).json({
+        success: true,
+        user_id: user._id,
+        message: "User registered successfully",
+      });
     } catch (error) {
       console.error("Registration error:", error);
-      res
-        .status(500)
-        .json({
-          message: "Server error",
-          error: error.message,
-          success: false,
-        });
+      res.status(500).json({
+        message: "Server error",
+        error: error.message,
+        success: false,
+      });
     }
   },
 ];
@@ -226,11 +220,261 @@ const getProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user.userId)
       .select("-password -card_information")
-      .populate("subscription");
+      .populate("subscription")
+      .populate({
+        path: "promotions",
+        select:
+          "category_id title description upc_id tags price status start_date end_date visibility created_at updated_at",
+        populate: { path: "category_id", select: "category_name" },
+      });
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(user);
   } catch (error) {
+    console.error("Get profile error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getUserDetails = [
+  check("userId").notEmpty().withMessage("User ID is required"),
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty())
+      return res.status(400).json({ success: false, errors: errors.array() });
+
+    const { userId } = req.params;
+    const requester = await User.findById(req.user.userId);
+    if (!requester || requester.role !== 1) {
+      return res.status(403).json({
+        success: false,
+        message: "Only admins can access user details",
+      });
+    }
+
+    try {
+      const user = await User.findById(userId)
+        .select("-password -card_information")
+        .populate("subscription")
+        .populate({
+          path: "promotions",
+          select:
+            "category_id title description upc_id tags price status start_date end_date visibility created_at updated_at",
+          populate: { path: "category_id", select: "category_name" },
+        });
+      if (!user)
+        return res
+          .status(404)
+          .json({ success: false, message: "User not found" });
+      if (user.role === 1)
+        return res.status(403).json({
+          success: false,
+          message: "Cannot fetch details of admin users",
+        });
+
+      let store = null;
+      if (user.role === 3) {
+        store = await Store.findOne({ user_id: user._id });
+        if (!store)
+          return res.status(404).json({
+            success: false,
+            message: "Store not found for store owner",
+          });
+      }
+
+      const response = {
+        success: true,
+        data: {
+          user: {
+            _id: user._id,
+            full_name: user.full_name,
+            store_name: user.store_name || null,
+            email: user.email,
+            role: user.role === 2 ? "reseller" : "store_owner",
+            dob: user.dob || null,
+            gender: user.gender || null,
+            phone_number: user.phone_number || null,
+            address: user.address || null,
+            expertise_level: user.expertise_level || null,
+            profile_image: user.profile_image || null,
+            subscription: user.subscription || null,
+            subscription_end_time: user.subscription_end_time || null,
+            total_promotions: user.total_promotions || 0,
+            used_promotions: user.used_promotions || 0,
+            promotions: user.promotions || [],
+            verified: user.verified || false,
+            total_scans: user.total_scans || 0,
+            scans_used: user.scans_used || [],
+            created_at: user.created_at,
+            updated_at: user.updated_at,
+          },
+          store:
+            user.role === 3
+              ? {
+                  _id: store._id,
+                  store_name: store.store_name,
+                  user_latitude: store.user_latitude || null,
+                  user_longitude: store.user_longitude || null,
+                  address: store.address || null,
+                  favorited_by: store.favorited_by || [],
+                  liked_by: store.liked_by || [],
+                  followed_by: store.followed_by || [],
+                  comments: store.comments || [],
+                }
+              : null,
+        },
+      };
+
+      res.json(response);
+    } catch (error) {
+      console.error("Get user details error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: error.message,
+      });
+    }
+  },
+];
+
+const getAllStoreOwnerDetails = async (req, res) => {
+  try {
+    const requester = await User.findById(req.user.userId);
+    if (!requester || requester.role !== 1) {
+      return res.status(403).json({
+        success: false,
+        message: "Only admins can access all users details",
+      });
+    }
+
+    const users = await User.find({ role: 3 })
+      .select("-password -card_information")
+      .populate("subscription")
+      .populate({
+        path: "promotions",
+        select:
+          "category_id title description upc_id tags price status start_date end_date visibility created_at updated_at",
+        populate: { path: "category_id", select: "category_name" },
+      });
+
+    const userDetails = await Promise.all(
+      users.map(async (user) => {
+        let store = null;
+        if (user.role === 3) {
+          store = await Store.findOne({ user_id: user._id });
+        }
+
+        return {
+          user: {
+            _id: user._id,
+            full_name: user.full_name,
+            store_name: user.store_name || null,
+            email: user.email,
+            role: "store_owner",
+            dob: user.dob || null,
+            gender: user.gender || null,
+            phone_number: user.phone_number || null,
+            address: user.address || null,
+            expertise_level: user.expertise_level || null,
+            profile_image: user.profile_image || null,
+            subscription: user.subscription || null,
+            subscription_end_time: user.subscription_end_time || null,
+            total_promotions: user.total_promotions || 0,
+            used_promotions: user.used_promotions || 0,
+            promotions: user.promotions || [],
+            verified: user.verified || false,
+            total_scans: user.total_scans || 0,
+            scans_used: user.scans_used || [],
+            created_at: user.created_at,
+            updated_at: user.updated_at,
+          },
+          store: store
+            ? {
+                _id: store._id,
+                store_name: store.store_name,
+                user_latitude: store.user_latitude || null,
+                user_longitude: store.user_longitude || null,
+                address: store.address || null,
+                favorited_by: store.favorited_by || [],
+                liked_by: store.liked_by || [],
+                followed_by: store.followed_by || [],
+                comments: store.comments || [],
+              }
+            : null,
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      data: userDetails,
+    });
+  } catch (error) {
+    console.error("Get all store owners details error:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
+const getAllResellerDetails = async (req, res) => {
+  try {
+    const requester = await User.findById(req.user.userId);
+    if (!requester || requester.role !== 1) {
+      return res.status(403).json({
+        success: false,
+        message: "Only admins can access all users details",
+      });
+    }
+
+    const users = await User.find({ role: 2 })
+      .select("-password -card_information")
+      .populate("subscription")
+      .populate({
+        path: "promotions",
+        select:
+          "category_id title description upc_id tags price status start_date end_date visibility created_at updated_at",
+        populate: { path: "category_id", select: "category_name" },
+      });
+
+    const userDetails = await Promise.all(
+      users.map(async (user) => {
+        return {
+          user: {
+            _id: user._id,
+            full_name: user.full_name,
+            store_name: user.store_name || null,
+            email: user.email,
+            role: "reseller",
+            dob: user.dob || null,
+            gender: user.gender || null,
+            phone_number: user.phone_number || null,
+            address: user.address || null,
+            expertise_level: user.expertise_level || null,
+            profile_image: user.profile_image || null,
+            subscription: user.subscription || null,
+            subscription_end_time: user.subscription_end_time || null,
+            total_promotions: user.total_promotions || 0,
+            used_promotions: user.used_promotions || 0,
+            promotions: user.promotions || [],
+            verified: user.verified || false,
+            total_scans: user.total_scans || 0,
+            scans_used: user.scans_used || [],
+            created_at: user.created_at,
+            updated_at: user.updated_at,
+          },
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      data: userDetails,
+    });
+  } catch (error) {
+    console.error("Get all resellers details error:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Server error", error: error.message });
   }
 };
 
@@ -356,12 +600,10 @@ const forgotPassword = [
       res.status(200).json({ message: "OTP sent to email" });
     } catch (error) {
       console.error("Forgot password error:", error);
-      res
-        .status(500)
-        .json({
-          message: "Server error",
-          error: { code: error.code, message: error.message },
-        });
+      res.status(500).json({
+        message: "Server error",
+        error: { code: error.code, message: error.message },
+      });
     }
   },
 ];
@@ -475,32 +717,11 @@ const deleteAccount = [
     const requesterId = req.user.userId;
 
     try {
-      const requester = await User.findById(requesterId);
-      if (!requester)
-        return res.status(404).json({ message: "Requester not found" });
-
-      let userToDelete;
-      if (user_id && requester.role === 1) {
-        userToDelete = await User.findById(user_id);
-        if (!userToDelete)
-          return res.status(404).json({ message: "User to delete not found" });
-        if (userToDelete.role === 1)
-          return res
-            .status(403)
-            .json({ message: "Admins cannot delete other admins" });
-      } else {
-        userToDelete = requester;
-        if (userToDelete.role === 1)
-          return res
-            .status(403)
-            .json({ message: "Admins cannot delete their own accounts" });
-      }
-
-      if (userToDelete.role === 3) {
-        await Store.deleteOne({ user_id: userToDelete._id });
-      }
-
-      await User.deleteOne({ _id: userToDelete._id });
+      userToDelete = await User.findById(user_id);
+      if (!userToDelete)
+        return res.status(404).json({ message: "User to delete not found" });
+      else await User.deleteOne({ _id: userToDelete._id });
+      await Store.deleteOne({ user_id: userToDelete._id });
       res.json({ message: "Account deleted successfully" });
     } catch (error) {
       console.error("Delete account error:", error);
@@ -546,7 +767,8 @@ const submitFeedback = [
         const notification = new Notification({
           _id: uuidv4(),
           user_id: admin._id,
-          message: `New feedback from ${user.full_name} (${user.email}): Rating: ${rating}/5, Suggestion: ${suggestion}`,
+          heading: "New Feedback Received",
+          content: `New feedback from ${user.full_name} (${user.email}): Rating: ${rating}/5, Suggestion: ${suggestion}`,
           type: user.role === 2 ? "reseller" : "store_owner",
         });
         await notification.save();
@@ -656,7 +878,8 @@ const approveStoreOwner = [
       const notification = new Notification({
         _id: uuidv4(),
         user_id: user._id,
-        message: "Your store owner account has been verified.",
+        heading: "Account Verified",
+        content: "Your store owner account has been verified.",
         type: "store_owner",
       });
       await notification.save();
@@ -704,7 +927,8 @@ const rejectStoreOwner = [
       const notification = new Notification({
         _id: uuidv4(),
         user_id: user._id,
-        message: "Your store owner account verification was rejected.",
+        heading: "Account Verification Rejected",
+        content: "Your store owner account verification was rejected.",
         type: "store_owner",
       });
       await notification.save();
@@ -726,6 +950,9 @@ module.exports = {
   register,
   login,
   getProfile,
+  getUserDetails,
+  getAllStoreOwnerDetails,
+  getAllResellerDetails,
   updateProfile,
   forgotPassword,
   verifyOTP,

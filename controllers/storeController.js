@@ -125,11 +125,9 @@ const updateStore = async (req, res) => {
     }
 
     if (user_id !== req.user.userId) {
-      return res
-        .status(403)
-        .json({
-          message: "Unauthorized: user_id does not match authenticated user",
-        });
+      return res.status(403).json({
+        message: "Unauthorized: user_id does not match authenticated user",
+      });
     }
 
     const store = await Store.findOneAndUpdate(
@@ -159,9 +157,7 @@ const updateStore = async (req, res) => {
 
 const getAllStores = async (req, res) => {
   try {
-    const stores = await Store.find().select(
-      "store_name address city user_latitude user_longitude views_count likes followers favorited_by liked_by followed_by comments"
-    );
+    const stores = await Store.find();
     res.json(stores);
   } catch (error) {
     console.error("Get all stores error:", error);
@@ -433,12 +429,10 @@ const getFavoriteStoresByUserId = [
     const authenticatedUser = await User.findById(req.user.userId);
 
     if (user_id !== req.user.userId && authenticatedUser.role !== 1) {
-      return res
-        .status(403)
-        .json({
-          message:
-            "Unauthorized: You can only view your own favorites or must be an admin",
-        });
+      return res.status(403).json({
+        message:
+          "Unauthorized: You can only view your own favorites or must be an admin",
+      });
     }
 
     try {
@@ -485,9 +479,7 @@ const getNearbyStores = [
       const stores = await Store.find({
         user_latitude: { $ne: null },
         user_longitude: { $ne: null },
-      }).select(
-        "store_name address city user_latitude user_longitude views_count likes followers"
-      );
+      }).select("store_name user_latitude user_longitude");
 
       // Calculate distances and filter
       const userLat = parseFloat(latitude);

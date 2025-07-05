@@ -7,7 +7,11 @@ const notificationSchema = new mongoose.Schema({
   heading: { type: String, required: true },
   content: { type: String, required: true },
   created_at: { type: Date, default: Date.now },
-  type: { type: String, enum: ["reseller", "store_owner"], required: true },
+  type: {
+    type: String,
+    enum: ["reseller", "store_owner", "all"],
+    required: true,
+  },
   read: { type: Boolean, default: false },
 });
 

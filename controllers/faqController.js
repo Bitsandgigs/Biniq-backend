@@ -6,7 +6,7 @@ const createFAQ = [
   check("question").notEmpty().withMessage("Question is required"),
   check("answer").notEmpty().withMessage("Answer is required"),
   check("type")
-    .isIn([1, 2])
+    .isIn([2, 3])
     .withMessage("Type must be 1 (Reseller app) or 2 (Admin app)"),
   async (req, res) => {
     const errors = validationResult(req);
@@ -45,11 +45,11 @@ const getFAQs = async (req, res) => {
 
     let faqs;
     if (user.role === 2) {
-      faqs = await FAQ.find({ type: 1 }); // Reseller app FAQs
+      faqs = await FAQ.find({ type: 2 }); // Reseller app FAQs
     } else if (user.role === 1) {
       faqs = await FAQ.find(); // All FAQs for admin
     } else {
-      faqs = []; // Store owners get no FAQs (adjust if needed)
+      faqs = await FAQ.find({ type: 3 }); // Store owners get no FAQs (adjust if needed)
     }
 
     res.json(faqs);
@@ -68,7 +68,7 @@ const updateFAQ = [
   check("answer").optional().notEmpty().withMessage("Answer cannot be empty"),
   check("type")
     .optional()
-    .isIn([1, 2])
+    .isIn([2, 3])
     .withMessage("Type must be 1 (Reseller app) or 2 (Admin app)"),
   async (req, res) => {
     const errors = validationResult(req);
