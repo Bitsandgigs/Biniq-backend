@@ -33,6 +33,10 @@ mongoose
   .catch((err) => console.error("MongoDB connection error:", err.message));
 
 // Routes
+app.get("/", (req, res) => {
+  res.status(200).send("Welcome to the server");
+});
+
 app.use("/api/users", userRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/categories", categoryRoutes);
