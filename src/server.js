@@ -61,6 +61,7 @@ app.use((err, req, res, next) => {
     status: err.status || 500,
   });
 });
+
 const initializePlans = async () => {
   try {
     const defaultPlans = [
@@ -83,40 +84,7 @@ const initializePlans = async () => {
     console.error("Failed to initialize plans:", error);
   }
 };
+
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-// const express = require('express');
-// const mongoose = require('mongoose');
-// const dotenv = require('dotenv');
-// const userRoutes = require('./routes/userRoutes');
-// const productRoutes = require('./routes/productRoutes');
-// const categoryRoutes = require('./routes/categoryRoutes');
-// const promotionRoutes = require('./routes/promotionRoutes');
-// const storeRoutes = require('./routes/storeRoutes');
-// const notificationRoutes = require('./routes/notificationRoutes');
-
-// // Load environment variables
-// dotenv.config();
-
-// const app = express();
-
-// // Middleware
-// app.use(express.json());
-
-// // Connect to MongoDB
-// mongoose.connect(process.env.MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
-//   .then(() => console.log('MongoDB connected'))
-//   .catch(err => console.error('MongoDB connection error:', err));
-
-// // Routes
-// app.use('/api/users', userRoutes);
-// app.use('/api/products', productRoutes);
-// app.use('/api/categories', categoryRoutes);
-// app.use('/api/promotions', promotionRoutes);
-// app.use('/api/stores', storeRoutes);
-// app.use('/api/notifications', notificationRoutes);
-
-// // Start server
-// const PORT = process.env.PORT || 5000;
-// app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
